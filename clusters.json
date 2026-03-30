@@ -1,0 +1,48 @@
+[
+  {
+    "name": "Machine Learning Fundamentals",
+    "focus": [
+      "Supervised learning — when would you pick it?",
+      "Model evaluation metrics: precision, recall, F1-score, AUC-ROC"
+    ],
+    "avoid": [
+      "Purely theoretical math proofs with no applied context",
+      "Image Recognition",
+      "Obscure statistical tests unrelated to the candidate's resume",
+      "Reinforcement learning"
+    ]
+  },
+  {
+    "name": "Deep Learning & Neural Networks",
+    "focus": [
+      "CNN, RNN, Transformer architectures — explain when you would use each",
+      "Transfer learning and fine-tuning pre-trained models"
+    ],
+    "avoid": [
+      "Deriving backpropagation equations from scratch",
+      "Niche research-only architectures the candidate has not listed on their resume"
+    ]
+  },
+  {
+    "name": "Python Programming & Data Engineering",
+    "focus": [
+      "Python best practices: generators, decorators, context managers",
+      "Data manipulation with pandas and NumPy"
+    ],
+    "avoid": [
+      "Language wars or comparisons with unrelated languages",
+      "Obscure CPython internals unrelated to practical work"
+    ]
+  },
+  {
+    "name": "Projects & Real-World Experience",
+    "focus": [
+      "Walk me through a challenging project from your resume and the decisions you made",
+      "What was the biggest technical obstacle you faced, and how did you solve it?"
+    ],
+    "avoid": [
+      "Hypothetical projects the candidate has never worked on",
+      "Probing into confidential details of previous employers"
+    ]
+  }
+]

@@ -1,3 +1,8 @@
 .venv
 __pycache__
 .env
+agent_log.txt
+resumes/
+transcripts/
+*.pdf
+config.json
