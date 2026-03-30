@@ -1,0 +1,19 @@
+{
+  "name": "interview-token-server",
+  "version": "1.0.0",
+  "description": "LiveKit token server with resume upload for the AI Interview Agent",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "livekit-server-sdk": "^2.9.1",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^11.1.0"
+  }
+}
