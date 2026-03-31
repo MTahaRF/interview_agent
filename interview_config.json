@@ -1,0 +1,60 @@
+{
+  "job_description": "Company Introduction\n\nAt InnovateTech Solutions, we are at the forefront of digital transformation, leveraging cutting-edge technologies to solve complex challenges and deliver exceptional value to our clients across various industries. Our culture thrives on collaboration, innovation, and a shared passion for pushing the boundaries of what's possible. We are building a distributed team of top-tier talent, united by a commitment to excellence and a vision for a smarter future.\n\nJob Summary: AI Developer\n\nWe are seeking a highly skilled and motivated AI Developer to join our remote team. In this role, you will be instrumental in designing, developing, and deploying innovative artificial intelligence and machine learning models. You will collaborate with cross-functional teams to understand business needs, translate them into technical specifications, and build intelligent systems that drive strategic initiatives. The ideal candidate is passionate about AI, stays current with emerging trends, and possesses a strong blend of technical expertise and problem-solving skills.\n\nKey Responsibilities\n\n*   Design, build, and train machine learning models and deep learning systems using frameworks like TensorFlow, PyTorch, or Scikit-learn.\n*   Develop, maintain, and optimize end-to-end ML pipelines, including data collection, preprocessing, feature engineering, model training, evaluation, and deployment.\n*   Collaborate with data engineers and software developers to integrate AI models into production systems and applications.\n*   Implement Natural Language Processing (NLP) and Computer Vision solutions to extract insights from unstructured data.\n*   Continuously research and implement state-of-the-art AI techniques to improve model performance, accuracy, and efficiency.\n*   Monitor, analyze, and troubleshoot deployed models to ensure optimal performance and implement retraining strategies as needed.\n*   Clearly communicate complex technical concepts and results to both technical and non-technical stakeholders.\n\nRequired Qualifications and Skills\n\n*   Bachelor’s degree in Computer Science, Data Science, Artificial Intelligence, or a related field.\n*   3+ years of professional experience in developing and deploying machine learning models.\n*   Proficiency in programming languages such as Python or R.\n*   Hands-on experience with ML frameworks and libraries (e.g., TensorFlow, PyTorch, Keras, Scikit-learn).\n*   Strong understanding of core AI/ML concepts, including supervised/unsupervised learning, neural networks, and deep learning architectures.\n*   Experience with data manipulation and analysis using SQL, Pandas, NumPy, or similar tools.\n*   Familiarity with MLOps principles and tools for versioning, CI/CD, and model monitoring (e.g., MLflow, Kubeflow).\n*   Excellent problem-solving abilities and a detail-oriented mindset.\n*   Strong communication and teamwork skills, with a proven ability to work effectively in a remote, collaborative environment.\n\nPreferred Qualifications\n\n*   Master’s or PhD in a relevant field.\n*   Experience with cloud platforms (AWS, Azure, or GCP) and their AI/ML services (SageMaker, Azure ML, Vertex AI).\n*   Proven experience in developing applications using Large Language Models (LLMs) or Generative AI.\n*   Knowledge of containerization technologies like Docker and Kubernetes.\n*   Publications or contributions to open-source AI projects.\n\nBenefits and Perks\n\n*   Competitive salary and comprehensive performance bonuses.\n*   Full medical, dental, and vision insurance.\n*   401(k) plan with company matching.\n*   Flexible work-from-home schedule with a supportive remote-first culture.\n*   Generous paid time off and company holidays.\n*   Annual stipend for professional development and continued learning.\n*   Opportunity to work on challenging projects with a talented and passionate team.",
+  "experience": {
+    "min_years": 3,
+    "max_years": 7
+  },
+  "knowledge_levels": {
+    "L1": "Awareness — Basic understanding or familiarity",
+    "L2": "Foundational — Working experience or standard practical exposure",
+    "L3": "Proficient — Strong, advanced experience",
+    "L4": "Expert — Expert-level experience or deep mastery",
+    "L5": "Mastery — Exceptional mastery or industry-leading expertise"
+  },
+  "skills": [
+    { "name": "Python", "level": "L3" },
+    { "name": "Machine Learning", "level": "L4" },
+    { "name": "System Design", "level": "L2" },
+    { "name": "Deep Learning", "level": "L3" }
+  ],
+  "topics_to_ask": [
+    {
+      "name": "Decorators & Generators",
+      "based_on_skills": ["Python"]
+    },
+    {
+      "name": "Model Evaluation & Selection",
+      "based_on_skills": ["Machine Learning"]
+    },
+    {
+      "name": "Feature Engineering Pipelines",
+      "based_on_skills": ["Python", "Machine Learning"]
+    },
+    {
+      "name": "Basic Architecture Patterns",
+      "based_on_skills": ["System Design"]
+    },
+    {
+      "name": "Transfer Learning & Fine-Tuning",
+      "based_on_skills": ["Deep Learning", "Machine Learning"]
+    }
+  ],
+  "topics_to_avoid": [
+    {
+      "name": "Basic variable syntax and for-loops",
+      "based_on_skills": ["Python"]
+    },
+    {
+      "name": "CPython internals and C extensions",
+      "based_on_skills": ["Python"]
+    },
+    {
+      "name": "Distributed consensus algorithms",
+      "based_on_skills": ["System Design"]
+    },
+    {
+      "name": "Deriving backpropagation from scratch",
+      "based_on_skills": ["Deep Learning"]
+    }
+  ]
+}

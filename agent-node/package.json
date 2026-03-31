@@ -1,0 +1,25 @@
+{
+  "name": "agent-node",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "agent.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@livekit/agents": "^1.2.2",
+    "@livekit/agents-plugin-google": "^1.2.2",
+    "@livekit/agents-plugin-sarvam": "^1.2.2",
+    "@livekit/agents-plugin-silero": "^1.2.2",
+    "dotenv": "^17.3.1",
+    "livekit-server-sdk": "^2.15.0",
+    "mongodb": "^7.1.1",
+    "pdf-parse": "^1.1.1",
+    "uuid": "^13.0.0",
+    "zod": "^4.3.6"
+  }
+}

@@ -1,8 +1,27 @@
-.venv
-__pycache__
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Environment & secrets
 .env
+config.json
+
+# Runtime artifacts
 agent_log.txt
 resumes/
 transcripts/
 *.pdf
-config.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Legacy Python files (not needed for Node deployment)
+*.pyc
+
+# Temp / debug
+diff.txt
+err.txt
+test_import.js

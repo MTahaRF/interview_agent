@@ -78,6 +78,8 @@ const upload = multer({
   },
 });
 
+const roomMetadataCache = new Map(); // Store metadata by roomName for token sync
+
 // ─── Express App ───────────────────────────────────────────────
 const app = express();
 app.use(cors());
@@ -127,6 +129,12 @@ app.get('/token', authMiddleware, async (req, res) => {
       ttl: '2h',
     });
 
+    // Populate token metadata from cache if available
+    if (roomMetadataCache.has(roomName)) {
+      at.metadata = roomMetadataCache.get(roomName);
+      console.log(`[TokenServer] Attached metadata to token for ${identity} in ${roomName}`);
+    }
+
     at.addGrant({
       roomJoin: true,
       room: roomName,
@@ -147,6 +155,7 @@ app.get('/token', authMiddleware, async (req, res) => {
 // ─── POST /upload-resume ──────────────────────────────────────
 app.post('/upload-resume', authMiddleware, upload.single('resume'), async (req, res) => {
   try {
+    console.log('[TokenServer] /upload-resume body:', req.body);
     if (!req.file) {
       return res.status(400).json({ error: 'No resume file uploaded' });
     }
@@ -157,15 +166,52 @@ app.post('/upload-resume', authMiddleware, upload.single('resume'), async (req, 
     const resumeId = resumeFilename.replace('.pdf', '');
     const roomName = `interview-${resumeId}`;
 
-    // Pre-create the LiveKit room with resume metadata
+    // Save interview config if provided
+    let interviewConfigPath = null;
+    if (req.body.interviewConfig) {
+      try {
+        // Validate it's valid JSON
+        const configData = JSON.parse(req.body.interviewConfig);
+        const configFilename = `${resumeId}_config.json`;
+        const configFullPath = resolve(RESUME_DIR, configFilename);
+
+        const { writeFileSync } = await import('fs');
+        writeFileSync(configFullPath, JSON.stringify(configData, null, 2), 'utf-8');
+
+        interviewConfigPath = `resumes/${configFilename}`;
+        console.log(`[TokenServer] Interview config saved: ${interviewConfigPath}`);
+      } catch (parseErr) {
+        console.error('[TokenServer] Invalid interview config JSON:', parseErr.message);
+        return res.status(400).json({ error: 'Invalid interviewConfig JSON' });
+      }
+    }
+
+    // Pre-create the LiveKit room with resume + config metadata
     const roomService = new RoomServiceClient(LIVEKIT_HTTP_URL, API_KEY, API_SECRET);
+    const roomMetadata = {
+      resume_path: resumePath,
+      candidate_identity: identity,
+      candidate_id: req.body.candidate_id || null,
+      application_id: req.body.application_id || null,
+      job_id: req.body.job_id || null,
+      created_at: new Date().toISOString(),
+    };
+
+    if (interviewConfigPath) {
+      roomMetadata.interview_config_path = interviewConfigPath;
+    }
+
+    const roomMetadataStr = JSON.stringify(roomMetadata);
+    console.log('[TokenServer] Creating room with metadata:', roomMetadataStr);
+    
+    // Store in cache for token endpoint
+    roomMetadataCache.set(roomName, roomMetadataStr);
+    // Cleanup cache after 15 minutes
+    setTimeout(() => roomMetadataCache.delete(roomName), 15 * 60 * 1000);
+
     await roomService.createRoom({
       name: roomName,
-      metadata: JSON.stringify({
-        resume_path: resumePath,
-        candidate_identity: identity,
-        created_at: new Date().toISOString(),
-      }),
+      metadata: roomMetadataStr,
       emptyTimeout: 600,    // Auto-delete room after 10 min idle
       maxParticipants: 3,   // Candidate + Agent + optional observer
     });
@@ -177,6 +223,7 @@ app.post('/upload-resume', authMiddleware, upload.single('resume'), async (req, 
       resumeId,
       roomName,
       resumePath,
+      interviewConfigPath,
     });
   } catch (err) {
     console.error('[TokenServer] Resume upload failed:', err.message);

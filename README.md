@@ -1,138 +1,195 @@
-# AI Interview Agent
+# LiveKit AI Interview Agent — Node.js
 
-An interactive, AI-powered interview agent built with **LiveKit**. This application allows users to experience a fully conversational voice interview with an AI agent that listens, understands, and responds in real-time.
+A real-time AI-powered interview agent built on [LiveKit](https://livekit.io/) Agents SDK (Node.js 1.x). The agent conducts structured technical interviews using voice, with automatic transcription, topic tracking, and MongoDB integration.
 
----
-
-## 🏗️ Architecture
-
-The system consists of four main components running together:
-
-1. **LiveKit Server (SFU)**: The core engine that handles real-time audio/video streaming via WebRTC.
-2. **Token Server (Node.js)**: A backend server that authenticates users, generates LiveKit JWTs (tokens), and serves the static frontend.
-3. **Agent (Python)**: The "brain" of the AI. It uses the LiveKit SDK to connect to rooms, processes user speech, and orchestrates the AI pipeline (VAD → STT → LLM → TTS).
-4. **Frontend (HTML/JS)**: The user interface where candidates connect to the room, speak through their microphone, and see live transcripts.
-
-### How it works with LiveKit
+## Architecture
 
 ```
-┌──────────┐     WebSocket      ┌───────────────┐     gRPC/WS      ┌──────────┐
-│ Frontend │ ◄═══════════════► │ LiveKit Server │ ◄═══════════════► │  Agent   │
-│ (Browser)│    (Audio Tracks)  │  :7880         │   (Agent SDK)    │ (Python) │
-└──────────┘                    └───────────────┘                    └──────────┘
-      │                                                                    
-      │  GET /token                                                        
-      ▼                                                                    
-┌──────────────┐                                                           
-│ Token Server │  Generates JWT using LIVEKIT_API_KEY / SECRET             
-│  :8081       │                                                           
-└──────────────┘                                                           
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Frontend      │───▶│   Token Server   │───▶│  LiveKit Server │
+│ (HTML/JS/CSS)   │    │  (Express, 8081) │    │   (ws://7880)   │
+└─────────────────┘    └──────────────────┘    └────────┬────────┘
+                                                        │
+                                                        ▼
+                                               ┌─────────────────┐
+                                               │   Agent Worker   │
+                                               │  (agent-node/)   │
+                                               │                  │
+                                               │  STT: Sarvam AI  │
+                                               │  TTS: Sarvam AI  │
+                                               │  LLM: Gemini 2.5 │
+                                               │  VAD: Silero     │
+                                               └────────┬────────┘
+                                                        │
+                                                        ▼
+                                               ┌─────────────────┐
+                                               │    MongoDB       │
+                                               │  (Transcripts)   │
+                                               └─────────────────┘
 ```
 
-1. **Authentication**: The Frontend requests a token from the **Token Server**.
-2. **Connection**: The Token Server returns a JWT, which the Frontend uses to connect to the **LiveKit Server**.
-3. **Streaming**: The Frontend publishes microphone audio to LiveKit. The **Agent** subscribes to this audio.
-4. **AI Pipeline (Agent)**:
-    - **VAD** (Silero Voice Activity Detection) detects when the user starts and stops talking.
-    - **STT** (Sarvam) converts the user's speech into text.
-    - **LLM** (Google Gemini) generates the interviewer's response based on the candidate's answer and the provided resume.
-    - **TTS** (Google Text-to-Speech) converts the LLM's text response back into an audio stream.
-5. **Response**: The Agent publishes the resulting audio track back to LiveKit, which the Frontend plays to the candidate.
+## Project Structure
 
----
+```
+├── agent-node/              # LiveKit Agent Worker (Node.js)
+│   ├── agent.js             # Main entry point — session lifecycle
+│   ├── prompts.js           # System prompt builder (resume + MongoDB job config)
+│   ├── tools.js             # LLM tools (transition_topic, end_call)
+│   ├── logger.js            # Transcript file writer with structured markers
+│   ├── processor.js         # Post-interview MongoDB upload
+│   └── package.json
+│
+├── token-server/            # Express server for LiveKit token generation
+│   ├── server.js            # Token endpoint + resume upload + static serving
+│   └── package.json
+│
+├── frontend/                # Browser-based interview UI
+│   ├── index.html           # Interview page
+│   ├── app.js               # LiveKit SDK client logic
+│   └── style.css            # Styling
+│
+├── .env.example             # Environment variable template
+├── .gitignore
+└── README.md
+```
 
-## 🚀 Getting Started
+## Prerequisites
 
-### Prerequisites
+- **Node.js** ≥ 18
+- **LiveKit Server** — Self-hosted or cloud ([docs](https://docs.livekit.io/home/self-hosting/local/))
+- **API Keys**:
+  - [Sarvam AI](https://www.sarvam.ai/) — STT (saaras:v3) & TTS (bulbul:v3)
+  - [Google AI](https://aistudio.google.com/) — Gemini 2.5 Flash
+- **MongoDB** — For job configs and transcript storage
 
-- **Python 3.9+**
-- **Node.js 18+**
-- A Google API Key (for Gemini and Google Cloud TTS)
-- Sarvam API Key (for Speech-to-Text)
+## Quick Start
 
-### 1. Installation
+### 1. Clone & Install
 
-**Python Dependencies (Agent)**:
 ```bash
-python -m venv .venv
+git clone https://github.com/techpranee-org/livekit-deployment.git
+cd livekit-deployment
 
-# On Windows:
-.venv\Scripts\activate
-# On Mac/Linux:
-# source .venv/bin/activate
+# Install agent dependencies
+cd agent-node && npm install && cd ..
 
-pip install -r requirements.txt
+# Install token server dependencies
+cd token-server && npm install && cd ..
 ```
 
-**Node Dependencies (Token Server)**:
+### 2. Configure Environment
+
 ```bash
-cd token-server
-npm install
-cd ..
+cp .env.example .env
+# Edit .env with your actual API keys and MongoDB URI
 ```
 
-### 2. Environment Variables
-Create a `.env` file in the root of the project directory based on your API credentials:
+### 3. Start LiveKit Server (Development)
 
-```ini
-# LiveKit setup
-LIVEKIT_URL=ws://127.0.0.1:7880
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=secret
-
-# Internal auth for your token server
-INTERVIEW_API_KEY=dev-interview-key
-
-# AI Providers
-GOOGLE_API_KEY=your_google_ai_studio_or_gcp_key
-SARVAM_API_KEY=your_sarvam_api_key
-```
-*(Make sure to replace the placeholder API keys with your actual keys)*
-
----
-
-## 🏃‍♂️ How to Run
-
-Running the app requires starting 3 separate processes. Open 3 terminal tabs in the root directory.
-
-### Terminal 1: Start the LiveKit Server
-Start the local LiveKit WebRTC server in development mode.
 ```bash
-./livekit-server.exe --dev
+# Download from https://github.com/livekit/livekit/releases
+./livekit-server --dev
 ```
-*(On Mac/Linux, download the respective LiveKit binaries or use Docker)*
 
-### Terminal 2: Start the Token & Web Server
-This starts the backend Node server which issues tokens and also serves the frontend files.
+### 4. Start Token Server
+
 ```bash
 cd token-server
 npm run dev
-# or npm start
 ```
 
-### Terminal 3: Start the Python AI Agent
-Ensure your python virtual environment is activated, then run:
+### 5. Start Agent Worker
+
 ```bash
-python google-agent.py dev
+cd agent-node
+node agent.js dev
 ```
-*Note: Depending on how the system prompt is generated, make sure you have a `resumes/` folder or upload the resume via the token server's `/upload-resume` endpoint.*
 
----
+### 6. Open Frontend
 
-## 🎮 Using the Application
+Navigate to `http://localhost:8081` in your browser.
 
-1. Open your browser and navigate to the frontend served by the token server: **`http://localhost:8081`**
-2. In the connection UI, ensure the credentials match what is in your `.env` file (e.g. `dev-interview-key` for the Auth Key).
-3. Click "Connect". 
-4. The Agent should greet you. You can talk to the agent naturally through your microphone. 
-5. A live transcript of the conversation alongside audio visualization will be displayed on the screen!
+## How It Works
 
----
+### Interview Flow
 
-## 📁 File Structure
+1. **User uploads resume** → Token server stores PDF and creates a LiveKit room with metadata
+2. **Agent joins room** → Reads room metadata (resume path, job ID)
+3. **System prompt built** → Parses resume PDF + fetches job config from MongoDB
+4. **Voice interview begins** → Agent greets candidate and follows topic structure
+5. **Topic tracking** → `transition_topic` tool logs `[TOPIC_START/END]` markers with skills & proficiency levels
+6. **End call** → `end_call` tool logs `[SESSION_END]`, says farewell, and triggers shutdown
+7. **Post-processing** → Transcript parsed and uploaded to MongoDB with structured document
 
-- `livekit-server.exe` — The local development WebRTC SFU server.
-- `google-agent.py` — The core AI logic (using LiveKit Agents Python SDK).
-- `get_system_prompt.py` — Logic used by the agent to parse resumes and generate customized context for the LLM.
-- `frontend/` — The raw HTML, JS, and CSS for the interview interface.
-- `token-server/` — An Express.js backend for authentication, resume uploads, and serving the frontend.
+### Transcript Format
+
+```
+[SESSION_START] 2026-03-31T16:03:18.000Z | Job: Senior React Developer
+[METADATA] CAND:user123 | APP:app456 | JOB:69cbbe0730202aca28dd4281
+[SKILLS] React:L4, JavaScript:L4, TypeScript:L3, HTML/CSS Development:L3
+[TOPICS] Frontend Development & UI Implementation, Type Safety & Application Architecture
+
+Interviewer: Hello! My name is Ritu, and I will be your interviewer today.
+Candidate: Hi Ritu, my day has been good.
+
+[TOPIC_START] Frontend Development & UI Implementation | React, JavaScript, HTML/CSS Development | L4 | 2026-03-31T...
+Interviewer: Could you describe your experience developing responsive web applications?
+Candidate: Sure, at my previous role I built...
+[TOPIC_END] Frontend Development & UI Implementation | React, JavaScript, HTML/CSS Development | L4 | 2026-03-31T...
+
+[SESSION_END] 2026-03-31T16:15:00.000Z
+```
+
+### MongoDB Document Schema
+
+```json
+{
+  "candidate_id": "user123",
+  "application_id": "app456",
+  "job_id": "69cbbe07...",
+  "conversation_log": "Interviewer: Hello!...\nCandidate: Hi...",
+  "topics": [{ "name": "Frontend Dev", "skills_based_on": ["React", "JS"] }],
+  "skills": ["React:L4", "JavaScript:L4"],
+  "topic_logs": [{
+    "topic": "Frontend Dev",
+    "skills": ["React", "JS"],
+    "start_time": "2026-03-31T...",
+    "end_time": "2026-03-31T...",
+    "log": "Interviewer: Could you...\nCandidate: Sure..."
+  }],
+  "created_at": "2026-03-31T...",
+  "status": "completed"
+}
+```
+
+## AI Components
+
+| Component | Provider | Model | Purpose |
+|-----------|----------|-------|---------|
+| STT | Sarvam AI | saaras:v3 | Speech-to-text (Hindi/English) |
+| TTS | Sarvam AI | bulbul:v3 (ritu) | Text-to-speech |
+| LLM | Google | gemini-2.5-flash | Interview responses & tool calls |
+| VAD | Silero | — | Voice activity detection |
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `LIVEKIT_URL` | LiveKit server WebSocket URL |
+| `LIVEKIT_API_KEY` | LiveKit API key |
+| `LIVEKIT_API_SECRET` | LiveKit API secret |
+| `SARVAM_API_KEY` | Sarvam AI API key (STT + TTS) |
+| `GOOGLE_API_KEY` | Google Gemini API key |
+| `INTERVIEW_API_KEY` | Token server auth key |
+| `TOKEN_SERVER_PORT` | Token server port (default: 8081) |
+| `MONGODB_URI` | MongoDB connection string |
+| `INTERVIEW_DB` | Database name |
+| `TRANSCRIPT_COLLECTION` | Collection for transcripts |
+| `JOB_COLLECTION` | Collection for job configs |
+
+## Deployment Notes
+
+- The agent worker runs as a persistent process and auto-accepts job requests from LiveKit
+- Resume PDFs are stored in `resumes/` (gitignored) and cleaned up by the token server
+- Transcripts are written to `transcripts/` during interviews and deleted after MongoDB upload
+- For production, use `LIVEKIT_URL=wss://your-livekit-domain.com` with proper TLS

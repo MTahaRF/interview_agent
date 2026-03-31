@@ -188,11 +188,30 @@ $btnStart.addEventListener('click', async () => {
   hideSetupError();
 
   try {
-    // Step 1: Upload resume
+    // Step 1: Upload resume + interview config
     log('Uploading resume…');
     const formData = new FormData();
     formData.append('resume', selectedFile);
     formData.append('identity', identity);
+
+    const candidateId = document.getElementById('input-candidate-id').value.trim();
+    const appId = document.getElementById('input-application-id').value.trim();
+    const jobId = document.getElementById('input-job-id').value.trim();
+    if (candidateId) formData.append('candidate_id', candidateId);
+    if (appId) formData.append('application_id', appId);
+    if (jobId) formData.append('job_id', jobId);
+
+    // Include interview config if provided
+    const configText = document.getElementById('input-interview-config').value.trim();
+    if (configText) {
+      try {
+        JSON.parse(configText); // validate JSON
+        formData.append('interviewConfig', configText);
+        log('Interview config attached.', 'info');
+      } catch (e) {
+        throw new Error('Invalid JSON in Interview Config: ' + e.message);
+      }
+    }
 
     const uploadRes = await fetch(`${tokenServer}/upload-resume`, {
       method: 'POST',
