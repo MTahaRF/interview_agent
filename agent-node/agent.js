@@ -115,8 +115,8 @@ const agent = defineAgent({
     const vad = await silero.VAD.load({
       activationThreshold: 0.7,
       deactivationThreshold: 0.3,
-      minSpeechDuration: 0.1,
-      minSilenceDuration: 1.0,
+      minSpeechDuration: 0.5,
+      minSilenceDuration: 1.5,
     });
     console.log('[Agent] AI Components initialized.');
 
