@@ -62,52 +62,82 @@ A real-time AI-powered interview agent built on [LiveKit](https://livekit.io/) A
   - [Google AI](https://aistudio.google.com/) — Gemini 2.5 Flash
 - **MongoDB** — For job configs and transcript storage
 
-## Quick Start
+## Getting Started & Initialization
 
-### 1. Clone & Install
+Follow these steps to initialize and run the project from scratch.
 
+### 1. Prerequisite Installations
+Ensure you have the following installed on your system:
+- **Node.js** (v18 or higher)
+- **MongoDB** (Local or Atlas connection string)
+- **Git** 
+
+### 2. Clone the Repository
 ```bash
-git clone https://github.com/techpranee-org/livekit-deployment.git
-cd livekit-deployment
+git clone <your-repository-url>
+cd <your-repository-directory>
+```
 
+### 3. Install Dependencies
+You must install Node modules for both the agent worker and the token server.
+```bash
 # Install agent dependencies
-cd agent-node && npm install && cd ..
+cd agent-node
+npm install
+cd ..
 
 # Install token server dependencies
-cd token-server && npm install && cd ..
+cd token-server
+npm install
+cd ..
 ```
 
-### 2. Configure Environment
-
+### 4. Configure Environment Variables
+Create your configuration file from the template:
 ```bash
 cp .env.example .env
-# Edit .env with your actual API keys and MongoDB URI
 ```
+Open `.env` in a text editor and populate your actual keys:
+- `SARVAM_API_KEY` (For STT & TTS)
+- `GOOGLE_API_KEY` (For Gemini 2.5 Flash)
+- `MONGODB_URI` (Your MongoDB connection string)
+- *(LiveKit keys can be left as default dev keys if using local server)*
 
-### 3. Start LiveKit Server (Development)
+### 5. Download LiveKit Server Binary
+If you are running LiveKit locally, download the pre-compiled binary for your OS from the [LiveKit GitHub Releases](https://github.com/livekit/livekit/releases) page. Place the `livekit-server.exe` (or equivalent binary) directly into the root directory of this project.
 
+### 6. Start the Project Services
+A convenience batch file is provided for Windows users to launch all required services simultaneously.
+
+**Option A: Using the Batch script (Windows)**
+Simply double-click the `start.bat` file in the root directory. This will automatically open three separate command prompt windows running:
+1. LiveKit Server (in `--dev` mode)
+2. Token Server
+3. Agent Worker Node
+
+**Option B: Manual Startup (Mac/Linux/Windows)**
+Open three separate terminal sessions in the root directory:
+
+**Terminal 1 (LiveKit):**
 ```bash
-# Download from https://github.com/livekit/livekit/releases
 ./livekit-server --dev
 ```
 
-### 4. Start Token Server
-
+**Terminal 2 (Token Server):**
 ```bash
 cd token-server
 npm run dev
 ```
 
-### 5. Start Agent Worker
-
+**Terminal 3 (Agent Worker):**
 ```bash
 cd agent-node
 node agent.js dev
 ```
 
-### 6. Open Frontend
-
-Navigate to `http://localhost:8081` in your browser.
+### 7. Open the Application
+Once all three services are running successfully, open your browser and navigate to:
+`http://localhost:8081`
 
 ## How It Works
 

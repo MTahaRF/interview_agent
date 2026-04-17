@@ -3,6 +3,7 @@ import path from 'path';
 import { MongoClient, ObjectId } from 'mongodb';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
+import { getMongoClient } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +28,7 @@ function parseTranscript(transcriptPath) {
     topics: [],
     skills: [],
     topic_logs: [],
+    question_types: [],     // per-turn question type markers
   };
 
   const convoLines = [];
@@ -39,6 +41,7 @@ function parseTranscript(transcriptPath) {
   const skillsRe = /^\[SKILLS\]\s*(.+)$/;
   const topicsRe = /^\[TOPICS\]\s*(.+)$/;
   const metadataRe = /^\[METADATA\]\s*CAND:(.*?)\s*\|\s*APP:(.*?)\s*\|\s*JOB:(.*?)$/;
+  const questionRe = /^\[QUESTION\]\s*(.+?)\s*\|\s*(\S+)\s*\|\s*(.+)$/;
   // Simple topic start (from logger.js format: [TOPIC_START] TopicName)
   const simpleTopicStartRe = /^\[TOPIC_START\]\s*(.+)$/;
 
@@ -142,6 +145,23 @@ function parseTranscript(transcriptPath) {
       continue;
     }
 
+    // --- Question type markers ---
+    const mQuestion = questionRe.exec(line);
+    if (mQuestion) {
+      const qEntry = {
+        topic: mQuestion[1].trim(),
+        type: mQuestion[2].trim(),
+        timestamp: mQuestion[3].trim(),
+      };
+      result.question_types.push(qEntry);
+      // Also attach to current topic log
+      if (currentTopic) {
+        if (!currentTopic.question_types) currentTopic.question_types = [];
+        currentTopic.question_types.push(qEntry.type);
+      }
+      continue;
+    }
+
     // --- Conversation lines ---
     if (line.startsWith('Interviewer:') || line.startsWith('Candidate:')) {
       convoLines.push(line);
@@ -179,7 +199,7 @@ export async function processTranscript(transcriptPath) {
     return;
   }
 
-  const client = new MongoClient(mongoUri);
+  const client = await getMongoClient(mongoUri);
   try {
     const parsed = parseTranscript(transcriptPath);
 
@@ -192,24 +212,26 @@ export async function processTranscript(transcriptPath) {
       topics: parsed.topics,
       skills: parsed.skills,
       topic_logs: parsed.topic_logs,
+      question_types: parsed.question_types,
       created_at: new Date(),
       status: 'completed',
     };
 
-    await client.connect();
     const db = client.db(dbName);
     const collection = db.collection(transcriptCollName);
 
-    const result = await collection.insertOne(doc);
-    console.log(`[Agent] Interview saved to MongoDB: ${result.insertedId}`);
-
-    // Cleanup file after successful upload
-    fs.unlinkSync(transcriptPath);
-    console.log(`[Agent] Transcript file deleted: ${transcriptPath}`);
+    const result = await collection.insertOne(doc, { writeConcern: { w: 'majority', wtimeout: 10000 } });
+    
+    if (result.acknowledged) {
+      console.log(`[Agent] Interview saved to MongoDB: ${result.insertedId}`);
+      // Cleanup file after successful upload
+      fs.unlinkSync(transcriptPath);
+      console.log(`[Agent] Transcript file deleted: ${transcriptPath}`);
+    } else {
+      console.error(`[Agent] MongoDB write not fully acknowledged. Transcript kept: ${transcriptPath}`);
+    }
 
   } catch (error) {
     console.error(`[Agent] Post-processing failed: ${error.message}`);
-  } finally {
-    await client.close();
   }
 }

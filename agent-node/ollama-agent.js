@@ -1,18 +1,17 @@
 import * as agents from '@livekit/agents';
 const { cli, defineAgent, voice, llm, WorkerOptions, initializeLogger } = agents;
-import * as google from '@livekit/agents-plugin-google';
+import * as openai from '@livekit/agents-plugin-openai';
 import * as sarvam from '@livekit/agents-plugin-sarvam';
 import * as silero from '@livekit/agents-plugin-silero';
-import * as livekitPlugin from '@livekit/agents-plugin-livekit';
 import { ConnectionState } from '@livekit/rtc-node';
 import dotenv from 'dotenv';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { z } from 'zod';
 import { getSystemPrompt } from './prompts.js';
 import { endCallTool } from './tools.js';
-import { createTranscript, logTurn, logTopicMarker, logQuestionType, logSessionEnd } from './logger.js';
+import { createTranscript, logTurn, logTopicMarker, logSessionEnd } from './logger.js';
 import { processTranscript } from './processor.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,10 +27,10 @@ const agent = defineAgent({
   prewarm: async (proc) => {
     console.log('[Prewarm] Loading Silero VAD weights into memory...');
     proc.userData.vad = await silero.VAD.load({
-      activationThreshold: 0.5,     // Lowered from 0.8 to pick up quiet "umm"s
-      deactivationThreshold: 0.2,   // Lowered from 0.5 to prevent cutting off fading speech
-      minSpeechDuration: 0.5,       // Lowered to react faster
-      minSilenceDuration: 1.0,      // Increased sightly to wait through breaths
+      activationThreshold: 0.8,
+      deactivationThreshold: 0.3,
+      minSpeechDuration: 0.8,
+      minSilenceDuration: 0.8,
     });
     console.log('[Prewarm] Silero VAD prewarmed successfully.');
   },
@@ -71,11 +70,12 @@ const agent = defineAgent({
 
     const jobId = metadata.job_id || null;
     const applicationId = metadata.application_id || null;
+    const resumePath = path.resolve(__dirname, '..', metadata.resume_path || 'ML_Resume.pdf');
     const targetDurationMins = metadata.duration ? parseInt(metadata.duration, 10) : 30;
-    console.log(`[Agent] Job ID: ${jobId} | Application ID: ${applicationId} | Duration: ${targetDurationMins}m`);
+    console.log(`[Agent] Resume Path: ${resumePath} | Job ID: ${jobId} | Application ID: ${applicationId} | Duration: ${targetDurationMins}m`);
 
     // 3. Build System Prompt and Load Config
-    const { systemPrompt, interviewConfig } = await getSystemPrompt(jobId, applicationId);
+    const { systemPrompt, interviewConfig } = await getSystemPrompt(resumePath, jobId, applicationId);
     console.log(`[Agent] Prompt built. Topics: ${interviewConfig.topics_to_ask?.length || 0}`);
 
     // 3b. Build topic lookup for skills/level info (matches Python InterviewAgent)
@@ -108,9 +108,10 @@ const agent = defineAgent({
       mode: 'transcribe'
     });
 
-    const model = new google.LLM({
-      model: 'gemini-3.1-flash-lite-preview',
-      apiKey: process.env.GOOGLE_API_KEY,
+    const model = new openai.LLM({
+      model: process.env.OLLAMA_MODEL || 'llama3.1',
+      baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1',
+      apiKey: process.env.OLLAMA_API_KEY || 'ollama',
     });
 
     const tts = new sarvam.TTS({
@@ -127,148 +128,43 @@ const agent = defineAgent({
 
     const vad = ctx.proc.userData.vad;
     console.log('[Agent] AI Components initialized.');
-
+    
     // 6. Setup Time and Topic Tracking
     let sessionStartTime = null;
     let topicsCompleted = 0;
     const totalTopics = interviewConfig.topics_to_ask ? interviewConfig.topics_to_ask.length : 1;
 
-    // 7. Create custom InterviewAgent with pipeline node overrides
-    // - llmNode: inline topic detection via [Topic = "..."] markers
-    class InterviewAgent extends voice.Agent {
+    const transitionTopicTool = llm.tool({
+      name: 'transition_topic',
+      description: 'Call this immediately AFTER you have spoken your transition phrase out loud. This logs that the conversation is moving to a new topic. Pass the exact name of the new topic.',
+      parameters: z.object({
+        next_topic_name: z.string().describe('The exact name of the new topic being started.')
+      }),
+      execute: async ({ next_topic_name }) => {
+        if (!sessionStartTime) sessionStartTime = Date.now();
+        topicsCompleted++;
+        
+        const elapsedMs = Date.now() - sessionStartTime;
+        const elapsedMins = Math.floor(elapsedMs / 60000);
+        const remainingTopicsCount = Math.max(0, totalTopics - topicsCompleted);
+        
+        const note = `SYSTEM NOTE: ${elapsedMins} minute(s) have passed out of the ${targetDurationMins}-minute target limit. You have ${remainingTopicsCount} topics remaining. If time is running short, prioritize completing the remaining topics by asking fewer follow-ups and moving quickly.`;
+        
+        console.log(`[Agent] Time/Topic Tracker: Topic ${topicsCompleted}/${totalTopics} | Elapsed: ${elapsedMins}m/${targetDurationMins}m`);
+        return `Transitioned to topic: ${next_topic_name}. ${note}`;
+      },
+    });
 
-      // ── LLM node: topic detection ──
-      async llmNode(chatCtx, toolCtx, modelSettings) {
-        const stream = await voice.Agent.default.llmNode(this, chatCtx, toolCtx, modelSettings);
-        if (!stream) return null;
-
-        let markerBuffer = '';
-        let markerParsed = false;
-        let firstChunk = true;
-        let totalChars = 0;
-        let detectedQuestionType = null;
-        let debugChunksCount = 0;
-
-        const replaceChunkContent = (val, newContent) => {
-          if (typeof val === 'string') return newContent;
-          const newVal = { ...val };
-          if (newVal.choices && newVal.choices[0]?.delta) newVal.choices = [{ ...newVal.choices[0], delta: { ...newVal.choices[0].delta, content: newContent } }];
-          else if (newVal.delta) newVal.delta = { ...newVal.delta, content: newContent };
-          else if (newVal.content !== undefined) newVal.content = newContent;
-          return newVal;
-        };
-
-        return new ReadableStream({
-          start(controller) {
-            const reader = stream.getReader();
-            const pump = async () => {
-              try {
-                const { done, value } = await reader.read();
-                if (done) {
-                  if (markerBuffer) {
-                    // Fallback ChatChunk enqueue on finish
-                    controller.enqueue({ delta: { content: markerBuffer, role: "assistant" } });
-                    markerBuffer = '';
-                  }
-                  controller.close();
-                  return;
-                }
-
-                // Extract text from chunk
-                let text = '';
-                if (typeof value === 'string') {
-                  text = value;
-                } else if (value?.choices?.[0]?.delta?.content) {
-                  text = value.choices[0].delta.content;
-                } else if (value?.delta?.content) {
-                  text = value.delta.content;
-                } else if (value?.content) {
-                  text = value.content;
-                }
-
-                totalChars += (text?.length || 0);
-
-                if (!markerParsed) {
-                  markerBuffer += text;
-
-                  const markerMatch = markerBuffer.match(/\[Topic\s*=\s*"([^"]+)"\s*\|\s*Type\s*=\s*"([^"]+)"\]/);
-                  if (markerMatch) {
-                    const detectedTopic = markerMatch[1];
-                    const questionType = markerMatch[2];
-                    detectedQuestionType = questionType;
-                    markerParsed = true;
-
-                    console.log(`[Agent] [MARKER] Topic="${detectedTopic}" Type="${questionType}"`);
-
-                    if (detectedTopic !== currentTopic) {
-                      if (!sessionStartTime) sessionStartTime = Date.now();
-                      topicsCompleted++;
-
-                      if (currentTopic) {
-                        const prevTopic = currentTopic;
-                        const prevInfo = topicLookup[prevTopic] || { skills: [], level: 'N/A' };
-                        logTopicMarker(transcriptPath, 'END', prevTopic, prevInfo.skills, prevInfo.level);
-                        console.log(`[Agent] [TOPIC_END] ${prevTopic}`);
-                      }
-
-                      const nextInfo = topicLookup[detectedTopic] || { skills: [], level: 'N/A' };
-                        logTopicMarker(transcriptPath, 'START', detectedTopic, nextInfo.skills, nextInfo.level);
-                      currentTopic = detectedTopic;
-
-                      const elapsedMs = Date.now() - sessionStartTime;
-                      const elapsedMins = Math.floor(elapsedMs / 60000);
-                      console.log(`[Agent] [TOPIC_START] ${detectedTopic} (${nextInfo.skills.join(', ')}/${nextInfo.level}) | Topic ${topicsCompleted}/${totalTopics} | Elapsed: ${elapsedMins}m/${targetDurationMins}m`);
-                    }
-
-                    // Queue question type to transcript file AFTER topic transitions
-                    logQuestionType(transcriptPath, detectedTopic, questionType);
-
-                    const cleanText = markerBuffer.replace(/\[Topic\s*=\s*"[^"]+"\s*\|\s*Type\s*=\s*"[^"]+"\]\s*/g, '');
-                    markerBuffer = '';
-
-                    if (typeof value === 'string') {
-                      if (cleanText) controller.enqueue(cleanText);
-                    } else {
-                      controller.enqueue(replaceChunkContent(value, cleanText));
-                    }
-                  } else if (markerBuffer.length > 300) {
-                    markerParsed = true;
-                    if (typeof value === 'string') {
-                      controller.enqueue(markerBuffer);
-                    } else {
-                      controller.enqueue(replaceChunkContent(value, markerBuffer));
-                    }
-                    markerBuffer = '';
-                  } else {
-                    // STILL BUFFERING
-                    if (typeof value !== 'string') {
-                      controller.enqueue(replaceChunkContent(value, ''));
-                    }
-                  }
-                } else {
-                  controller.enqueue(value);
-                }
-
-                pump();
-              } catch (err) {
-                controller.error(err);
-              }
-            };
-            pump();
-          },
-        });
-      }
-
-    }
-
-    console.log('[Agent] Initializing InterviewAgent with inline topic detection...');
-    const assistant = new InterviewAgent({
+    // 7. Create Voice Agent (instructions + tools only)
+    console.log('[Agent] Initializing voice.Agent...');
+    const assistant = new voice.Agent({
       instructions: systemPrompt,
       tools: {
-        end_call: endCallTool
+        end_call: endCallTool,
+        transition_topic: transitionTopicTool
       }
     });
-    console.log('[Agent] InterviewAgent ready.');
+    console.log('[Agent] voice.Agent ready.');
 
     // 8. Create AgentSession (pipeline components)
     console.log('[Agent] Creating AgentSession...');
@@ -277,17 +173,11 @@ const agent = defineAgent({
       llm: model,
       tts,
       vad,
-      turnHandling: {
-        turnDetection: new livekitPlugin.turnDetector.MultilingualModel(),
-        interruption: {
-          enabled: true,
-        },
-        endpointing: {
-          minDelay: 500, // 0.5 seconds (allow fast response when EOU probability is high)
-          maxDelay: 3000, // 3.0 seconds maximum wait
-        }
-      },
-      preemptiveGeneration: false,
+      turnDetection: 'vad',
+      allowInterruptions: true,
+      minInterruptionDuration: 0.5,
+      minEndpointingDelay: 0.5,
+      maxEndpointingDelay: 1.5,
     });
 
     // 9. Start session with agent + room
@@ -328,18 +218,49 @@ const agent = defineAgent({
     // Flag to signal the while loop to exit
     let shouldExit = false;
 
-    // 11. Listen for end_call tool execution
+    // 11. Listen for tool execution results
     session.on('function_tools_executed', (evt) => {
       try {
         for (const call of (evt.functionCalls || [])) {
-          if (call.name === 'end_call') {
+          const args = typeof call.args === 'string' ? JSON.parse(call.args) : (call.args || {});
+          if (call.name === 'transition_topic') {
+            const nextTopicName = args.next_topic_name || args.topic_name;
+
+            // Skip if already on this topic
+            if (currentTopic === nextTopicName) {
+              console.log(`[Agent] Already on topic: ${nextTopicName}, skipping.`);
+              continue;
+            }
+
+            // End current topic if one is active
+            if (currentTopic) {
+              const prevInfo = topicLookup[currentTopic] || { skills: [], level: 'N/A' };
+              logTopicMarker(transcriptPath, 'END', currentTopic, prevInfo.skills, prevInfo.level);
+              console.log(`[Agent] [TOPIC_END] ${currentTopic}`);
+            }
+
+            // Start new topic
+            const info = topicLookup[nextTopicName] || { skills: [], level: 'N/A' };
+            logTopicMarker(transcriptPath, 'START', nextTopicName, info.skills, info.level);
+            currentTopic = nextTopicName;
+            console.log(`[Agent] [TOPIC_START] ${nextTopicName} (${info.skills.join(', ')}/${info.level})`);
+
+          } else if (call.name === 'end_call') {
             console.log('[Agent] AI decided to end the call. Will exit after farewell...');
+
+            // End current topic if active
+            if (currentTopic) {
+              const prevInfo = topicLookup[currentTopic] || { skills: [], level: 'N/A' };
+              logTopicMarker(transcriptPath, 'END', currentTopic, prevInfo.skills, prevInfo.level);
+            }
+            // Log session end
+            logSessionEnd(transcriptPath);
 
             // Wait for farewell TTS, then signal exit
             setTimeout(() => {
               console.log('[Agent] Farewell timeout reached. Signaling exit...');
               shouldExit = true;
-            }, 15000); // 15 seconds to allow full synthesis and playout
+            }, 8000);
           }
         }
       } catch (e) {
@@ -349,21 +270,13 @@ const agent = defineAgent({
 
     // 12. Trigger initial greeting
     console.log('[Agent] Triggering initial greeting...');
-    session.say("Hi, I am Ritu. How has your day been so far?");
+    session.say('Hello! My name is Ritu, and I will be your interviewer today. How has your day been so far?');
 
     // Keep entrypoint alive until disconnected or exit signaled
     console.log('[Agent] Waiting for interview to complete...');
     while (ctx.room.connectionState === ConnectionState.CONN_CONNECTED && !shouldExit) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
-    // End current topic if active
-    if (currentTopic) {
-      const prevInfo = topicLookup[currentTopic] || { skills: [], level: 'N/A' };
-      logTopicMarker(transcriptPath, 'END', currentTopic, prevInfo.skills, prevInfo.level);
-    }
-    // Log session end
-    logSessionEnd(transcriptPath);
 
     // Close session and process transcript BEFORE disconnecting
     console.log('[Agent] Exiting interview loop. Closing session...');

@@ -6,7 +6,7 @@
  *
  * Endpoints:
  *   GET  /token?room=<room>&identity=<identity>   →  { token }
- *   POST /upload-resume                           →  { resumeId, roomName }
+ *   POST /start-interview                          →  { roomName }
  *   GET  /health                                  →  { status: "ok" }
  *
  * Auth:
@@ -34,7 +34,6 @@ dotenv.config({ path: resolve(__dirname, '..', '.env') });
 
 import express from 'express';
 import cors from 'cors';
-import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 
@@ -49,34 +48,6 @@ const INTERVIEW_KEY   = process.env.INTERVIEW_API_KEY || 'dev-interview-key';
 const LIVEKIT_HTTP_URL = LIVEKIT_URL
   .replace('wss://', 'https://')
   .replace('ws://', 'http://');
-
-// Resume storage directory (shared with the Python agent)
-const RESUME_DIR = resolve(__dirname, '..', 'resumes');
-if (!existsSync(RESUME_DIR)) {
-  mkdirSync(RESUME_DIR, { recursive: true });
-}
-
-// ─── Multer (file upload) ──────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, RESUME_DIR),
-  filename: (_req, file, cb) => {
-    const id = uuidv4();
-    const ext = file.originalname.split('.').pop() || 'pdf';
-    cb(null, `${id}.${ext}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF files are accepted'));
-    }
-  },
-});
 
 const roomMetadataCache = new Map(); // Store metadata by roomName for token sync
 
@@ -152,19 +123,14 @@ app.get('/token', authMiddleware, async (req, res) => {
   }
 });
 
-// ─── POST /upload-resume ──────────────────────────────────────
-app.post('/upload-resume', authMiddleware, upload.single('resume'), async (req, res) => {
+// ─── POST /start-interview ────────────────────────────────────
+app.post('/start-interview', authMiddleware, async (req, res) => {
   try {
-    console.log('[TokenServer] /upload-resume body:', req.body);
-    if (!req.file) {
-      return res.status(400).json({ error: 'No resume file uploaded' });
-    }
+    console.log('[TokenServer] /start-interview body:', req.body);
 
     const identity = req.body.identity || 'candidate';
-    const resumeFilename = req.file.filename;
-    const resumePath = `resumes/${resumeFilename}`;
-    const resumeId = resumeFilename.replace('.pdf', '');
-    const roomName = `interview-${resumeId}`;
+    const sessionId = uuidv4();
+    const roomName = `interview-${sessionId}`;
 
     // Save interview config if provided
     let interviewConfigPath = null;
@@ -172,13 +138,17 @@ app.post('/upload-resume', authMiddleware, upload.single('resume'), async (req, 
       try {
         // Validate it's valid JSON
         const configData = JSON.parse(req.body.interviewConfig);
-        const configFilename = `${resumeId}_config.json`;
-        const configFullPath = resolve(RESUME_DIR, configFilename);
+        const configFilename = `${sessionId}_config.json`;
+        const configDir = resolve(__dirname, '..', 'configs');
+        if (!existsSync(configDir)) {
+          mkdirSync(configDir, { recursive: true });
+        }
+        const configFullPath = resolve(configDir, configFilename);
 
         const { writeFileSync } = await import('fs');
         writeFileSync(configFullPath, JSON.stringify(configData, null, 2), 'utf-8');
 
-        interviewConfigPath = `resumes/${configFilename}`;
+        interviewConfigPath = `configs/${configFilename}`;
         console.log(`[TokenServer] Interview config saved: ${interviewConfigPath}`);
       } catch (parseErr) {
         console.error('[TokenServer] Invalid interview config JSON:', parseErr.message);
@@ -186,14 +156,14 @@ app.post('/upload-resume', authMiddleware, upload.single('resume'), async (req, 
       }
     }
 
-    // Pre-create the LiveKit room with resume + config metadata
+    // Pre-create the LiveKit room with metadata
     const roomService = new RoomServiceClient(LIVEKIT_HTTP_URL, API_KEY, API_SECRET);
     const roomMetadata = {
-      resume_path: resumePath,
       candidate_identity: identity,
       candidate_id: req.body.candidate_id || null,
       application_id: req.body.application_id || null,
       job_id: req.body.job_id || null,
+      duration: req.body.duration || 30,
       created_at: new Date().toISOString(),
     };
 
@@ -216,32 +186,20 @@ app.post('/upload-resume', authMiddleware, upload.single('resume'), async (req, 
       maxParticipants: 3,   // Candidate + Agent + optional observer
     });
 
-    console.log(`[TokenServer] Resume uploaded: ${resumePath}`);
     console.log(`[TokenServer] Room pre-created: ${roomName}`);
 
     res.json({
-      resumeId,
       roomName,
-      resumePath,
       interviewConfigPath,
     });
   } catch (err) {
-    console.error('[TokenServer] Resume upload failed:', err.message);
-    res.status(500).json({ error: 'Resume upload failed' });
+    console.error('[TokenServer] Interview start failed:', err.message);
+    res.status(500).json({ error: 'Interview start failed' });
   }
 });
 
-// ─── Error handler for multer ──────────────────────────────────
+// ─── Error handler ─────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: 'File too large (max 10 MB)' });
-    }
-    return res.status(400).json({ error: err.message });
-  }
-  if (err.message === 'Only PDF files are accepted') {
-    return res.status(415).json({ error: err.message });
-  }
   console.error('[TokenServer] Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
@@ -251,7 +209,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('╔═══════════════════════════════════════════════════╗');
   console.log(`║  Token Server (Node.js) running on port ${PORT}      ║`);
   console.log(`║  GET  http://127.0.0.1:${PORT}/token                 ║`);
-  console.log(`║  POST http://127.0.0.1:${PORT}/upload-resume         ║`);
+  console.log(`║  POST http://127.0.0.1:${PORT}/start-interview        ║`);
   console.log(`║  GET  http://127.0.0.1:${PORT}/health                ║`);
   console.log('║                                                   ║');
   console.log(`║  Auth: Bearer ${INTERVIEW_KEY.slice(0, 8)}…${' '.repeat(Math.max(0, 26 - INTERVIEW_KEY.slice(0, 8).length))}║`);

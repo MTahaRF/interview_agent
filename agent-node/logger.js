@@ -80,6 +80,16 @@ export function logTopicMarker(transcriptPath, markerType, topicName, skills = [
 }
 
 /**
+ * Logs a [QUESTION] marker to the transcript file.
+ * Format: [QUESTION] TopicName | question_type | ISO_timestamp
+ */
+export function logQuestionType(transcriptPath, topicName, questionType) {
+  const ts = new Date().toISOString();
+  const marker = `[QUESTION] ${topicName} | ${questionType} | ${ts}`;
+  fs.appendFileSync(transcriptPath, `${marker}\n`);
+}
+
+/**
  * Logs a [SESSION_END] marker to the transcript file.
  */
 export function logSessionEnd(transcriptPath) {

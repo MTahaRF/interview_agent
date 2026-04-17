@@ -2,11 +2,11 @@
    Interview Agent — LiveKit Frontend (app.js)
    ═══════════════════════════════════════════════════════════════
    Two-phase flow:
-     1. Setup Screen — upload resume, enter name → POST /upload-resume + GET /token
+     1. Setup Screen — enter name + IDs → POST /start-interview + GET /token
      2. Interview Screen — mic, visualizer, transcript (same as before)
 
    The token server (Node.js) handles:
-     - Resume upload → saves PDF, pre-creates room with metadata
+     - Interview setup → pre-creates room with metadata
      - Token generation → JWT for the created room
    ═══════════════════════════════════════════════════════════════ */
 
@@ -23,12 +23,6 @@ const {
 
 // ─── DOM References — Setup Screen ─────────────────────────────
 const $setupScreen     = document.getElementById('setup-screen');
-const $dropzone        = document.getElementById('resume-dropzone');
-const $dropContent     = document.getElementById('dropzone-content');
-const $dropUploaded    = document.getElementById('dropzone-uploaded');
-const $resumeInput     = document.getElementById('resume-input');
-const $resumeFilename  = document.getElementById('resume-filename');
-const $btnRemoveResume = document.getElementById('btn-remove-resume');
 const $candidateName   = document.getElementById('input-candidate-name');
 const $btnStart        = document.getElementById('btn-start-interview');
 const $setupError      = document.getElementById('setup-error');
@@ -55,7 +49,7 @@ const $agentAudio      = document.getElementById('agent-audio');
 const $btnDisconnect   = document.getElementById('btn-disconnect');
 const $sessionCandidate= document.getElementById('session-candidate');
 const $sessionRoom     = document.getElementById('session-room');
-const $sessionResume   = document.getElementById('session-resume');
+const $sessionTimer    = document.getElementById('session-timer');
 
 // ─── State ──────────────────────────────────────────────────
 let room = null;
@@ -64,7 +58,9 @@ let micAnalyser = null;
 let agentAnalyser = null;
 let audioCtx = null;
 let animFrameId = null;
-let selectedFile = null;  // Resume PDF file
+let targetDurationMins = 30;
+let durationTimerId = null;
+let sessionStartTime = null;
 
 // ─── Debug Logger ───────────────────────────────────────────
 function log(msg, level = 'info') {
@@ -94,67 +90,12 @@ function setBadge(state) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  PHASE 1: Setup Screen — Resume Upload + Start Interview
+//  PHASE 1: Setup Screen — Configure + Start Interview
 // ═══════════════════════════════════════════════════════════════
-
-// ─── Resume Dropzone ────────────────────────────────────────
-$dropzone.addEventListener('click', () => {
-  if (!selectedFile) $resumeInput.click();
-});
-
-$dropzone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  $dropzone.classList.add('dropzone--hover');
-});
-
-$dropzone.addEventListener('dragleave', () => {
-  $dropzone.classList.remove('dropzone--hover');
-});
-
-$dropzone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  $dropzone.classList.remove('dropzone--hover');
-  const file = e.dataTransfer.files[0];
-  if (file) handleFileSelect(file);
-});
-
-$resumeInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) handleFileSelect(e.target.files[0]);
-});
-
-function handleFileSelect(file) {
-  if (file.type !== 'application/pdf') {
-    showSetupError('Please select a PDF file.');
-    return;
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    showSetupError('File is too large (max 10 MB).');
-    return;
-  }
-
-  selectedFile = file;
-  $resumeFilename.textContent = file.name;
-  $dropContent.classList.add('hidden');
-  $dropUploaded.classList.remove('hidden');
-  $dropzone.classList.add('dropzone--has-file');
-  hideSetupError();
-  updateStartButton();
-}
-
-$btnRemoveResume.addEventListener('click', (e) => {
-  e.stopPropagation();
-  selectedFile = null;
-  $resumeInput.value = '';
-  $dropContent.classList.remove('hidden');
-  $dropUploaded.classList.add('hidden');
-  $dropzone.classList.remove('dropzone--has-file');
-  updateStartButton();
-});
 
 function updateStartButton() {
   const nameOk = $candidateName.value.trim().length > 0;
-  const fileOk = selectedFile !== null;
-  $btnStart.disabled = !(nameOk && fileOk);
+  $btnStart.disabled = !nameOk;
 }
 
 $candidateName.addEventListener('input', updateStartButton);
@@ -188,44 +129,51 @@ $btnStart.addEventListener('click', async () => {
   hideSetupError();
 
   try {
-    // Step 1: Upload resume + interview config
-    log('Uploading resume…');
-    const formData = new FormData();
-    formData.append('resume', selectedFile);
-    formData.append('identity', identity);
+    // Step 1: Start interview session (no resume upload)
+    log('Starting interview session…');
 
     const candidateId = document.getElementById('input-candidate-id').value.trim();
     const appId = document.getElementById('input-application-id').value.trim();
     const jobId = document.getElementById('input-job-id').value.trim();
-    if (candidateId) formData.append('candidate_id', candidateId);
-    if (appId) formData.append('application_id', appId);
-    if (jobId) formData.append('job_id', jobId);
+    const durationInput = document.getElementById('input-duration').value.trim();
+    targetDurationMins = durationInput ? parseInt(durationInput, 10) : 30;
+
+    const payload = {
+      identity,
+      duration: targetDurationMins,
+    };
+    if (candidateId) payload.candidate_id = candidateId;
+    if (appId) payload.application_id = appId;
+    if (jobId) payload.job_id = jobId;
 
     // Include interview config if provided
     const configText = document.getElementById('input-interview-config').value.trim();
     if (configText) {
       try {
         JSON.parse(configText); // validate JSON
-        formData.append('interviewConfig', configText);
+        payload.interviewConfig = configText;
         log('Interview config attached.', 'info');
       } catch (e) {
         throw new Error('Invalid JSON in Interview Config: ' + e.message);
       }
     }
 
-    const uploadRes = await fetch(`${tokenServer}/upload-resume`, {
+    const startRes = await fetch(`${tokenServer}/start-interview`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      body: formData,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
     });
 
-    if (!uploadRes.ok) {
-      const err = await uploadRes.json().catch(() => ({ error: `HTTP ${uploadRes.status}` }));
-      throw new Error(err.error || `Upload failed: HTTP ${uploadRes.status}`);
+    if (!startRes.ok) {
+      const err = await startRes.json().catch(() => ({ error: `HTTP ${startRes.status}` }));
+      throw new Error(err.error || `Start failed: HTTP ${startRes.status}`);
     }
 
-    const { resumeId, roomName } = await uploadRes.json();
-    log(`Resume uploaded. Room: ${roomName}`, 'info');
+    const { roomName } = await startRes.json();
+    log(`Interview session created. Room: ${roomName}`, 'info');
 
     // Step 2: Get token
     log('Fetching token…');
@@ -245,7 +193,7 @@ $btnStart.addEventListener('click', async () => {
     // Step 3: Update session info and switch screens
     $sessionCandidate.textContent = identity;
     $sessionRoom.textContent = roomName;
-    $sessionResume.textContent = selectedFile.name;
+    $sessionTimer.textContent = `${String(targetDurationMins).padStart(2, '0')}:00`;
 
     // Switch to interview UI
     $setupScreen.classList.add('hidden');
@@ -294,6 +242,34 @@ async function connectToRoom(wsUrl, token) {
       $partSection.classList.remove('hidden');
       $agentStatus.textContent = 'Connected — waiting for agent…';
       updateParticipants();
+      
+      // Start the UI Timer
+      sessionStartTime = Date.now();
+      const targetMs = targetDurationMins * 60 * 1000;
+      
+      if (durationTimerId) clearInterval(durationTimerId);
+      durationTimerId = setInterval(() => {
+        const elapsed = Date.now() - sessionStartTime;
+        const remainingMs = targetMs - elapsed;
+        
+        const isNegative = remainingMs < 0;
+        const absMs = Math.abs(remainingMs);
+        const m = Math.floor(absMs / 60000);
+        const s = Math.floor((absMs % 60000) / 1000);
+        
+        const timeStr = `${isNegative ? '-' : ''}${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        $sessionTimer.textContent = timeStr;
+        
+        // CSS states
+        if (isNegative) {
+          $sessionTimer.classList.remove('timer-warning');
+          $sessionTimer.classList.add('timer-danger');
+        } else if (remainingMs <= 5 * 60 * 1000) { // 5 mins left
+          $sessionTimer.classList.add('timer-warning');
+        } else {
+          $sessionTimer.classList.remove('timer-warning', 'timer-danger');
+        }
+      }, 1000);
     });
 
     room.on(RoomEvent.Disconnected, (reason) => {
@@ -331,6 +307,9 @@ async function connectToRoom(wsUrl, token) {
         $agentStatus.textContent = 'Agent connected';
         $agentStatus.classList.add('speaking');
         setupAgentAnalyser(track);
+        
+        // High priority helps the browser prioritize these audio packets for low latency
+        track.setPriority('high');
       }
     });
 
@@ -344,14 +323,14 @@ async function connectToRoom(wsUrl, token) {
     // ── Transcription events ──
     room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
       for (const seg of segments) {
-        if (seg.final) {
-          const isAgent = participant?.identity !== room.localParticipant.identity;
-          addTranscriptMessage(
-            isAgent ? 'Agent' : 'You',
-            seg.text,
-            isAgent ? 'agent' : 'user'
-          );
-        }
+        const isAgent = participant?.identity !== room.localParticipant.identity;
+        addTranscriptMessage(
+          isAgent ? 'Agent' : 'You',
+          seg.text,
+          isAgent ? 'agent' : 'user',
+          seg.id,
+          seg.final
+        );
       }
     });
 
@@ -397,6 +376,10 @@ function handleDisconnect() {
   $partSection.classList.add('hidden');
   $agentStatus.textContent = 'Interview ended';
   $agentStatus.classList.remove('speaking');
+  if (durationTimerId) {
+    clearInterval(durationTimerId);
+    durationTimerId = null;
+  }
   if (animFrameId) cancelAnimationFrame(animFrameId);
   room = null;
 }
@@ -433,19 +416,35 @@ function updateParticipants() {
 }
 
 // ─── Transcript ─────────────────────────────────────────────
-function addTranscriptMessage(sender, text, role) {
+function addTranscriptMessage(sender, text, role, id, isFinal) {
+  if (!text || !text.trim()) return;
+
   const placeholder = $transcript.querySelector('.transcript-placeholder');
   if (placeholder) placeholder.remove();
 
-  const div = document.createElement('div');
-  div.className = `msg msg--${role}`;
-  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-  div.innerHTML = `
-    <span class="msg-sender">${escapeHtml(sender)}</span>
-    <span class="msg-text">${escapeHtml(text)}</span>
-    <span class="msg-time">${ts}</span>
-  `;
-  $transcript.appendChild(div);
+  let div = document.getElementById(`msg-${id}`);
+  if (!div) {
+    div = document.createElement('div');
+    div.id = `msg-${id}`;
+    div.className = `msg msg--${role}`;
+    
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    div.innerHTML = `
+      <span class="msg-sender">${escapeHtml(sender)}</span>
+      <span class="msg-text">${escapeHtml(text)}</span>
+      <span class="msg-time">${ts}</span>
+    `;
+    $transcript.appendChild(div);
+  } else {
+    const textSpan = div.querySelector('.msg-text');
+    if (textSpan) textSpan.textContent = text;
+  }
+  
+  if (!isFinal) {
+    div.classList.add('msg--interim');
+  } else {
+    div.classList.remove('msg--interim');
+  }
 
   const container = document.getElementById('transcript-container');
   container.scrollTop = container.scrollHeight;
@@ -571,4 +570,4 @@ function startVisualizer() {
 // ─── Init ───────────────────────────────────────────────────
 log('Frontend loaded. Ready to connect.', 'info');
 log(`LiveKit SDK version: ${LivekitClient.version}`, 'info');
-log('Upload a resume and click Start Interview to begin.', 'info');
+log('Enter your name and click Start Interview to begin.', 'info');

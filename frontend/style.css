@@ -514,6 +514,17 @@ body {
   font-size: 0.72rem;
 }
 
+.timer-warning {
+  color: var(--yellow) !important;
+  font-weight: 600;
+}
+
+.timer-danger {
+  color: var(--red) !important;
+  font-weight: 600;
+  animation: pulse-badge 1.5s ease infinite;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    INTERVIEW SCREEN — Main Layout (same as before)
    ═══════════════════════════════════════════════════════════════ */
@@ -865,6 +876,12 @@ body {
   font-size: 0.85rem;
   line-height: 1.45;
   color: var(--text-primary);
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.msg--interim .msg-text {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .msg-time {

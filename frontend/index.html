@@ -49,35 +49,10 @@
           </svg>
         </div>
         <h2 class="setup-title">Start Your Interview</h2>
-        <p class="setup-subtitle">Upload your resume and begin a live AI-powered technical interview</p>
+        <p class="setup-subtitle">Configure and begin a live AI-powered technical interview</p>
       </div>
 
-      <!-- Resume Upload Dropzone -->
-      <div id="resume-dropzone" class="dropzone">
-        <div class="dropzone-content" id="dropzone-content">
-          <svg class="dropzone-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="12" y1="18" x2="12" y2="12"/>
-            <polyline points="9 15 12 12 15 15"/>
-          </svg>
-          <p class="dropzone-label">Drop your resume here</p>
-          <p class="dropzone-hint">or click to browse — PDF only, max 10 MB</p>
-        </div>
-        <div class="dropzone-uploaded hidden" id="dropzone-uploaded">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-          <span id="resume-filename">resume.pdf</span>
-          <button id="btn-remove-resume" class="btn-remove" title="Remove file">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
-        <input type="file" id="resume-input" accept=".pdf" hidden />
-      </div>
+
 
       <!-- Candidate Info -->
       <div class="setup-fields">
@@ -96,6 +71,10 @@
         <div class="form-group">
           <label for="input-job-id">Job ID</label>
           <input type="text" id="input-job-id" value="" placeholder="e.g. JOB_999" spellcheck="false" />
+        </div>
+        <div class="form-group">
+          <label for="input-duration">Target Duration (minutes)</label>
+          <input type="number" id="input-duration" value="30" min="1" max="120" />
         </div>
         <div class="form-group">
           <label for="input-interview-config">Interview Config (JSON)</label>
@@ -158,9 +137,10 @@
           <span class="session-label">Room</span>
           <span id="session-room" class="session-value mono">—</span>
         </div>
+
         <div class="session-row">
-          <span class="session-label">Resume</span>
-          <span id="session-resume" class="session-value">—</span>
+          <span class="session-label">Time Remaining</span>
+          <span id="session-timer" class="session-value mono">—</span>
         </div>
       </div>
 
